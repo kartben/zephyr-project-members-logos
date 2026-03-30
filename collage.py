@@ -237,15 +237,45 @@ def create_collage(logos, output_width, output_height, margin, padding, cell_asp
 
     return canvas
 
-def generate_collage_png():
+def _progress(progress_callback, step, message, fraction, **extra):
+    if not progress_callback:
+        return
+    payload = {"step": step, "message": message, "fraction": fraction, **extra}
+    progress_callback(payload)
+
+
+def generate_collage_png(progress_callback=None):
+    """
+    progress_callback receives a dict with at least:
+      step, message, fraction (0.0–1.0), and optional current/total/label.
+    """
+    _progress(progress_callback, "fetch_page", "Fetching member page…", 0.0)
     html_content = fetch_page_content(MEMBERS_URL)
+
+    _progress(progress_callback, "parse_logos", "Parsing Silver Members section…", 0.06)
     logo_infos = extract_silver_member_logos(html_content)
 
     if not logo_infos:
         raise RuntimeError("No silver member logos found")
 
+    n = len(logo_infos)
+    # Reserve ~0.06–0.82 for per-logo work (download + normalize).
+    span = 0.76
+
     processed_logos = []
-    for info in logo_infos:
+    for i, info in enumerate(logo_infos, start=1):
+        label = (info.get("alt") or "").strip() or f"logo {i}"
+        frac = 0.06 + span * (i - 1) / max(n, 1)
+        _progress(
+            progress_callback,
+            "logo",
+            f"Logo {i}/{n}: {label}",
+            frac,
+            current=i,
+            total=n,
+            label=label,
+        )
+
         url = info["src"]
         if not url.startswith("http"):
             url = urljoin(MEMBERS_URL, url)
@@ -263,6 +293,7 @@ def generate_collage_png():
     if not processed_logos:
         raise RuntimeError("No logos processed successfully")
 
+    _progress(progress_callback, "render_collage", "Building grid and rendering collage…", 0.86)
     collage = create_collage(
         processed_logos,
         OUTPUT_WIDTH,
@@ -272,9 +303,11 @@ def generate_collage_png():
         CELL_ASPECT_RATIO,
     )
 
+    _progress(progress_callback, "encode_png", "Encoding PNG…", 0.94)
     output = io.BytesIO()
     rgb = Image.new("RGB", collage.size, (255, 255, 255))
     rgb.paste(collage, mask=collage.split()[3] if collage.mode == "RGBA" else None)
     rgb.save(output, format="PNG")
     output.seek(0)
+    _progress(progress_callback, "done", "Done.", 1.0)
     return output.getvalue()
