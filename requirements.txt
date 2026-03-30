@@ -1,0 +1,6 @@
+Flask
+gunicorn
+requests
+beautifulsoup4
+Pillow
+cairosvg
